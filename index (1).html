@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Expérience Vidéo 360°</title>
+
+  <!-- ============================================================
+       IMPORTMAP : Three.js + VRButton depuis unpkg (dernière version stable)
+       ============================================================ -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.176.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.176.0/examples/jsm/"
+      }
+    }
+  </script>
+
+  <style>
+    /* ============================================================
+       RESET & BASE
+       ============================================================ */
+    *, *::before, *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+    }
+
+    /* Le canvas Three.js occupera tout l'écran */
+    canvas {
+      display: block;
+      width: 100% !important;
+      height: 100% !important;
+    }
+
+    /* ============================================================
+       OVERLAY D'ACCUEIL
+       Superposé au canvas, masqué après le clic utilisateur.
+       ============================================================ */
+    #overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2rem;
+
+      /* Fond sombre semi-transparent avec effet verre */
+      background: radial-gradient(ellipse at center,
+        rgba(10, 10, 30, 0.92) 0%,
+        rgba(0, 0, 0, 0.98) 100%);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+
+    /* Icône décorative (cercle animé) */
+    #overlay .icon-ring {
+      width: 96px;
+      height: 96px;
+      border-radius: 50%;
+      border: 3px solid rgba(255, 255, 255, 0.15);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      animation: pulse-ring 2.4s ease-in-out infinite;
+      position: relative;
+    }
+
+    #overlay .icon-ring::before {
+      content: '';
+      position: absolute;
+      inset: -12px;
+      border-radius: 50%;
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      animation: pulse-ring 2.4s ease-in-out infinite 0.4s;
+    }
+
+    #overlay .icon-ring svg {
+      width: 44px;
+      height: 44px;
+      fill: none;
+      stroke: rgba(255, 255, 255, 0.85);
+      stroke-width: 1.5;
+    }
+
+    @keyframes pulse-ring {
+      0%, 100% { transform: scale(1);   opacity: 0.8; }
+      50%       { transform: scale(1.06); opacity: 1;   }
+    }
+
+    /* Titre et sous-titre */
+    #overlay h1 {
+      font-size: clamp(1.5rem, 4vw, 2.4rem);
+      font-weight: 300;
+      color: #fff;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      text-align: center;
+    }
+
+    #overlay p {
+      font-size: clamp(0.85rem, 2vw, 1rem);
+      color: rgba(255, 255, 255, 0.45);
+      letter-spacing: 0.06em;
+      text-align: center;
+      max-width: 320px;
+      line-height: 1.6;
+    }
+
+    /* Bouton principal "Démarrer l'expérience 360" */
+    #btn-start {
+      cursor: pointer;
+      padding: 1rem 2.4rem;
+      border: 1px solid rgba(255, 255, 255, 0.35);
+      border-radius: 2px;
+      background: transparent;
+      color: #fff;
+      font-size: 0.95rem;
+      font-weight: 400;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      transition: background 0.3s, border-color 0.3s, transform 0.15s;
+      outline: none;
+    }
+
+    #btn-start:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.7);
+      transform: translateY(-2px);
+    }
+
+    #btn-start:active {
+      transform: translateY(0);
+    }
+
+    /* Mention compatible Quest */
+    #overlay .badge {
+      font-size: 0.72rem;
+      color: rgba(255, 255, 255, 0.25);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ============================================================
+       OVERLAY D'ACCUEIL
+       Affiché au chargement de la page ; masqué après le clic.
+       ============================================================ -->
+  <div id="overlay">
+
+    <!-- Icône 360 (SVG inline) -->
+    <div class="icon-ring">
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="12" cy="12" r="9"/>
+        <ellipse cx="12" cy="12" rx="4.5" ry="9"/>
+        <line x1="3" y1="12" x2="21" y2="12"/>
+      </svg>
+    </div>
+
+    <h1>Vidéo 360°</h1>
+
+    <p>Expérience immersive optimisée<br>pour le Meta Quest 3</p>
+
+    <!-- ► Bouton principal : démarre la vidéo et masque l'overlay -->
+    <button id="btn-start">Démarrer l'expérience 360</button>
+
+    <span class="badge">Compatible WebXR · Quest 3</span>
+
+  </div>
+
+  <!-- ============================================================
+       SCRIPT PRINCIPAL (module ES)
+       ============================================================ -->
+  <script type="module">
+
+    // Importation de Three.js et du module VRButton
+    import * as THREE            from 'three';
+    import { VRButton }          from 'three/addons/webxr/VRButton.js';
+
+    // ──────────────────────────────────────────────
+    // 1. CRÉATION DE L'ÉLÉMENT VIDÉO (invisible dans le DOM)
+    // ──────────────────────────────────────────────
+
+    const video = document.createElement('video');
+
+    // ► MODIFIEZ ICI LE NOM DU FICHIER VIDÉO SI NÉCESSAIRE ◄
+    video.src = './360test.mp4';
+
+    video.crossOrigin  = 'anonymous'; // Nécessaire pour la VideoTexture
+    video.playsInline  = true;        // Évite le plein écran natif sur iOS / Android
+    video.loop         = true;        // Lecture en boucle
+    video.muted        = false;       // Son activé (l'utilisateur a d'abord interagi)
+
+    // ──────────────────────────────────────────────
+    // 2. SCÈNE, CAMÉRA, RENDERER
+    // ──────────────────────────────────────────────
+
+    // Scène Three.js
+    const scene  = new THREE.Scene();
+
+    // Caméra perspective placée au centre de la sphère
+    const camera = new THREE.PerspectiveCamera(
+      75,                                      // Champ de vision (°)
+      window.innerWidth / window.innerHeight,  // Ratio initial
+      0.1,                                     // Plan de coupe proche
+      1000                                     // Plan de coupe lointain
+    );
+    camera.position.set(0, 0, 0); // Centre exact de la sphère
+
+    // Renderer WebGL
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+
+    // ► Activation de WebXR (indispensable pour le casque VR)
+    renderer.xr.enabled = true;
+
+    // Ajout du canvas au DOM
+    document.body.appendChild(renderer.domElement);
+
+    // ──────────────────────────────────────────────
+    // 3. BOUTON "ENTER VR" (ajouté au DOM via VRButton)
+    //    Visible uniquement après la fermeture de l'overlay.
+    // ──────────────────────────────────────────────
+
+    const vrButton = VRButton.createButton(renderer);
+    document.body.appendChild(vrButton);
+
+    // ──────────────────────────────────────────────
+    // 4. SPHÈRE 360° AVEC TEXTURE VIDÉO
+    // ──────────────────────────────────────────────
+
+    // Texture dynamique alimentée par l'élément <video>
+    const videoTexture           = new THREE.VideoTexture(video);
+    videoTexture.colorSpace      = THREE.SRGBColorSpace; // Correction colorimétrique
+    videoTexture.minFilter       = THREE.LinearFilter;
+    videoTexture.magFilter       = THREE.LinearFilter;
+
+    // Géométrie : sphère de rayon 500 (la caméra sera à l'intérieur)
+    const sphereGeometry = new THREE.SphereGeometry(
+      500,  // Rayon
+      60,   // Segments horizontaux
+      40    // Segments verticaux
+    );
+
+    // Matériau appliqué sur la face INTÉRIEURE de la sphère
+    const sphereMaterial = new THREE.MeshBasicMaterial({
+      map:  videoTexture,
+      side: THREE.BackSide  // ← CRITIQUE : affiche la texture vers l'intérieur
+    });
+
+    // Mesh final ajouté à la scène
+    const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+    scene.add(sphere);
+
+    // ──────────────────────────────────────────────
+    // 5. BOUCLE DE RENDU COMPATIBLE WEBXR
+    //    renderer.setAnimationLoop remplace requestAnimationFrame
+    //    et est appelé par le runtime XR à chaque frame.
+    // ──────────────────────────────────────────────
+
+    renderer.setAnimationLoop(() => {
+      // Mise à jour de la texture vidéo si la vidéo est en lecture
+      if (video.readyState >= video.HAVE_ENOUGH_DATA) {
+        videoTexture.needsUpdate = true;
+      }
+
+      renderer.render(scene, camera);
+    });
+
+    // ──────────────────────────────────────────────
+    // 6. GESTION DU REDIMENSIONNEMENT FENÊTRE
+    // ──────────────────────────────────────────────
+
+    window.addEventListener('resize', () => {
+      // Mise à jour du ratio de la caméra
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+
+      // Mise à jour de la taille du renderer
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // ──────────────────────────────────────────────
+    // 7. INTERACTION OVERLAY → DÉMARRAGE VIDÉO
+    //    Le clic utilisateur déverrouille l'autoplay audio.
+    // ──────────────────────────────────────────────
+
+    const overlay  = document.getElementById('overlay');
+    const btnStart = document.getElementById('btn-start');
+
+    btnStart.addEventListener('click', () => {
+
+      // Lancement de la vidéo (débloqué par l'interaction utilisateur)
+      video.play().catch((err) => {
+        console.warn('Lecture vidéo impossible :', err);
+      });
+
+      // Masquage de l'overlay pour dévoiler la scène 3D et le bouton "Enter VR"
+      overlay.style.display = 'none';
+    });
+
+  </script>
+
+</body>
+</html>
